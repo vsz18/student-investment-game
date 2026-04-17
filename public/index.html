@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Investment Game</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Role Selection Screen -->
+    <div id="roleSelection" class="screen active">
+        <div class="container">
+            <h1>🎯 Student Investment Game</h1>
+            <p class="subtitle">Select your role to begin</p>
+            
+            <div class="role-cards">
+                <div class="role-card" onclick="selectRole('instructor')">
+                    <div class="role-icon">👨‍🏫</div>
+                    <h2>Instructor</h2>
+                    <p>Upload companies, control game phases, and view results</p>
+                </div>
+                
+                <div class="role-card" onclick="selectRole('student')">
+                    <div class="role-icon">👨‍🎓</div>
+                    <h2>Student</h2>
+                    <p>Invest your $200,000 budget in companies</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Name Input Screen -->
+    <div id="nameInput" class="screen">
+        <div class="container">
+            <h1>Welcome!</h1>
+            <p class="subtitle">Please enter your name</p>
+            
+            <div class="form-group">
+                <input type="text" id="userName" placeholder="Enter your name" class="input-field">
+                <button onclick="submitName()" class="btn btn-primary">Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instructor Screen -->
+    <div id="instructorScreen" class="screen">
+        <div class="container">
+            <div class="header">
+                <h1>🎯 Instructor Dashboard</h1>
+                <div class="user-info">
+                    <span id="instructorName"></span>
+                </div>
+            </div>
+
+            <!-- Phase Control -->
+            <div class="card">
+                <h2>Game Phase Control</h2>
+                <div class="phase-indicator">
+                    Current Phase: <span id="currentPhase" class="phase-badge">Setup</span>
+                </div>
+                <div class="button-group">
+                    <button onclick="changePhase('setup')" class="btn btn-secondary">Setup</button>
+                    <button onclick="changePhase('voting')" class="btn btn-primary">Start Voting</button>
+                    <button onclick="changePhase('results')" class="btn btn-success">Show Results</button>
+                    <button onclick="resetGame()" class="btn btn-danger">Reset Game</button>
+                </div>
+            </div>
+
+            <!-- Upload Companies -->
+            <div class="card">
+                <h2>Upload Companies</h2>
+                <p>Upload an Excel file (.xlsx or .xls) with columns: "Company Name" and "Description"</p>
+                <div class="upload-area">
+                    <input type="file" id="excelFile" accept=".xlsx,.xls" onchange="handleFileSelect(event)">
+                    <label for="excelFile" class="upload-label">
+                        📁 Choose Excel File
+                    </label>
+                    <div id="uploadStatus"></div>
+                </div>
+                <div id="companiesList" class="companies-list"></div>
+            </div>
+
+            <!-- Live Leaderboard -->
+            <div class="card">
+                <h2>Live Leaderboard</h2>
+                <div id="instructorLeaderboard" class="leaderboard"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Student Screen -->
+    <div id="studentScreen" class="screen">
+        <div class="container">
+            <div class="header">
+                <h1>🎯 Student Investment Game</h1>
+                <div class="user-info">
+                    <span id="studentName"></span>
+                </div>
+            </div>
+
+            <!-- Budget Display -->
+            <div class="budget-card">
+                <div class="budget-label">Your Investment Budget</div>
+                <div class="budget-amount" id="studentBudget">$200,000</div>
+                <div class="budget-sublabel">Remaining to invest</div>
+            </div>
+
+            <!-- Waiting for Setup -->
+            <div id="waitingMessage" class="card text-center">
+                <h2>⏳ Waiting for instructor to start the game...</h2>
+                <p>The instructor will upload companies and start the voting phase.</p>
+            </div>
+
+            <!-- Voting Interface -->
+            <div id="votingInterface" class="card" style="display: none;">
+                <h2>Companies to Invest In</h2>
+                <p>Allocate your $200,000 budget across the companies below</p>
+                <div id="companiesGrid" class="companies-grid"></div>
+            </div>
+
+            <!-- Live Leaderboard -->
+            <div class="card">
+                <h2>Live Leaderboard</h2>
+                <div id="studentLeaderboard" class="leaderboard"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
