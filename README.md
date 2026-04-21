@@ -1,218 +1,156 @@
-# Student Investment Game
+# 🎯 Student Investment Game
 
-A real-time web application where students can submit companies and allocate virtual investment funds ($200,000) to their peers' projects.
+An interactive web application where students simulate angel investing by allocating a $200,000 budget across startup companies. Perfect for entrepreneurship classes, business courses, or pitch competitions.
 
-## Features
+## 🎮 How It Works
 
-- **Round 1 - Submission Phase**: Students submit company names and descriptions (optional)
-- **Round 2 - Voting Phase**: Students allocate $200K investment budget across companies
-- **Live Leaderboard**: Real-time updates showing total fundraising per company
-- **Restrictions**: Users cannot invest in their own company
-- **Admin Controls**: Instructor can control game phases and reset
+### For Instructors
+1. Access the instructor dashboard with password: `zongzi`
+2. Upload a list of companies via Excel/CSV or enter them manually
+3. Control game phases (submission, voting, results)
+4. View real-time investment results and rankings
 
-## Local Development
-
-### Prerequisites
-- Node.js 18 or higher
-- npm
-
-### Installation
-
-1. Navigate to the project directory:
-```bash
-cd investment-game
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Start the server:
-```bash
-npm start
-```
-
-4. Open your browser to `http://localhost:8080`
-
-## Deployment to IBM Cloud Code Engine
-
-### Prerequisites
-- IBM Cloud account
-- IBM Cloud CLI installed
-- Docker installed (for building container)
-- Code Engine plugin installed
-
-### Step 1: Install IBM Cloud CLI and Plugins
-
-```bash
-# Install IBM Cloud CLI (if not already installed)
-# macOS/Linux:
-curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
-
-# Install Code Engine plugin
-ibmcloud plugin install code-engine
-```
-
-### Step 2: Login to IBM Cloud
-
-```bash
-ibmcloud login
-```
-
-### Step 3: Target a Resource Group and Region
-
-```bash
-# List available resource groups
-ibmcloud resource groups
-
-# Target a resource group (replace with your group name)
-ibmcloud target -g Default
-
-# Set region (e.g., us-south, us-east, eu-gb)
-ibmcloud target -r us-south
-```
-
-### Step 4: Create a Code Engine Project
-
-```bash
-# Create a new project
-ibmcloud ce project create --name investment-game-project
-
-# Select the project
-ibmcloud ce project select --name investment-game-project
-```
-
-### Step 5: Build and Deploy the Application
-
-```bash
-# Navigate to the app directory
-cd investment-game
-
-# Build and deploy in one command
-ibmcloud ce application create \
-  --name investment-game \
-  --build-source . \
-  --strategy dockerfile \
-  --port 8080 \
-  --min-scale 1 \
-  --max-scale 3 \
-  --cpu 0.25 \
-  --memory 0.5G
-```
-
-### Step 6: Get the Application URL
-
-```bash
-# Get application details including URL
-ibmcloud ce application get --name investment-game
-```
-
-The output will show the application URL (e.g., `https://investment-game.xxx.us-south.codeengine.appdomain.cloud`)
-
-## Alternative: Deploy Using Container Registry
-
-If you prefer to build the container locally and push to IBM Container Registry:
-
-### Step 1: Build Docker Image Locally
-
-```bash
-# Login to IBM Container Registry
-ibmcloud cr login
-
-# Create a namespace (if you don't have one)
-ibmcloud cr namespace-add investment-game-ns
-
-# Build and tag the image
-docker build -t us.icr.io/investment-game-ns/investment-game:latest .
-
-# Push to registry
-docker push us.icr.io/investment-game-ns/investment-game:latest
-```
-
-### Step 2: Deploy from Registry
-
-```bash
-# Create application from registry image
-ibmcloud ce application create \
-  --name investment-game \
-  --image us.icr.io/investment-game-ns/investment-game:latest \
-  --registry-secret icr-secret \
-  --port 8080 \
-  --min-scale 1 \
-  --max-scale 3 \
-  --cpu 0.25 \
-  --memory 0.5G
-```
-
-## Managing the Application
-
-### View Application Status
-```bash
-ibmcloud ce application get --name investment-game
-```
-
-### View Logs
-```bash
-ibmcloud ce application logs --name investment-game
-```
-
-### Update Application
-```bash
-ibmcloud ce application update --name investment-game --build-source .
-```
-
-### Delete Application
-```bash
-ibmcloud ce application delete --name investment-game
-```
-
-### Delete Project
-```bash
-ibmcloud ce project delete --name investment-game-project
-```
-
-## Usage Instructions
-
-### For Instructors:
-1. Share the application URL with students
-2. Use the "Game Controls" section to manage phases:
-   - **Start Submission**: Allow students to submit companies
-   - **Start Voting**: Begin the investment phase
-   - **Show Results**: Display final leaderboard
-   - **Reset Game**: Clear all data and start over
-
-### For Students:
-1. **Submission Phase**: 
-   - Enter your name (required)
-   - Optionally submit a company with description
-   - Or just participate as an investor
-
-2. **Voting Phase**:
-   - View all submitted companies
-   - Allocate your $200K budget across companies
+### For Students
+1. **Round 1 (Optional)**: Submit your own company with name and description
+2. **Round 2**: Invest your $200,000 budget across all companies
+   - Allocate funds in any amount to any company
    - Cannot invest in your own company
-   - Watch the live leaderboard update
+   - Watch your remaining budget decrease as you invest
+3. **Results**: See the final rankings based on total investments received
 
-3. **Results Phase**:
-   - View final rankings
-   - See total investment each company received
+## 🚀 Quick Start
 
-## Technology Stack
+### Local Development
 
-- **Frontend**: HTML, CSS, JavaScript
-- **Backend**: Node.js, Express
-- **Real-time**: Socket.io
-- **Deployment**: IBM Cloud Code Engine
-- **Container**: Docker
+```bash
+# Install dependencies
+npm install
 
-## Notes
+# Start the server
+npm start
 
-- The application uses in-memory storage, so data resets when the server restarts
-- WebSocket connections enable real-time updates across all connected users
-- The app is designed for classroom use with 10-50 students
-- For production use with persistence, consider adding a database
+# Open browser to http://localhost:3000
+```
 
-## Support
+### Deploy to Production
 
-For issues or questions, please contact your instructor or IT support.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions to:
+- **Render.com** (Recommended - Free)
+- **Railway.app** (Alternative - Free)
+- **Heroku** (Alternative)
+
+## 📋 Features
+
+- **Real-time Updates**: All students see live investment totals using WebSocket
+- **Dual Roles**: Separate interfaces for instructors and students
+- **Excel Upload**: Instructors can bulk upload companies from Excel/CSV
+- **Password Protection**: Instructor dashboard requires authentication
+- **Mobile Responsive**: Works on phones, tablets, and desktops
+- **No Database Required**: All data stored in memory (resets on restart)
+
+## 🎨 Screenshots
+
+### Role Selection
+Students and instructors choose their role at the start.
+
+### Student View
+- See all companies with descriptions
+- Allocate investment budget
+- Track remaining funds
+- View real-time rankings
+
+### Instructor Dashboard
+- Upload companies via Excel
+- Control game phases
+- View investment results
+- See detailed analytics
+
+## 📊 Excel Upload Format
+
+Create an Excel file with these columns:
+
+| Company Name | Description |
+|--------------|-------------|
+| TechStart Inc | AI-powered productivity tools |
+| GreenEnergy Co | Sustainable energy solutions |
+| HealthTrack | Fitness and wellness app |
+
+See `sample-companies.xlsx` for an example.
+
+## 🔧 Configuration
+
+### Change Instructor Password
+
+Edit `server.js` line 15:
+```javascript
+const INSTRUCTOR_PASSWORD = 'your-new-password';
+```
+
+### Adjust Investment Budget
+
+Edit `public/app.js` line 3:
+```javascript
+const INITIAL_BUDGET = 200000; // Change to any amount
+```
+
+### Modify Port
+
+```bash
+PORT=8080 npm start
+```
+
+## 🛠️ Technology Stack
+
+- **Frontend**: HTML5, CSS3, Vanilla JavaScript
+- **Backend**: Node.js, Express.js
+- **Real-time**: Socket.IO (WebSocket)
+- **File Upload**: Multer, XLSX
+- **Containerization**: Docker
+
+## 📦 Project Structure
+
+```
+investment-game/
+├── public/
+│   ├── index.html      # Main HTML file
+│   ├── styles.css      # Styling
+│   └── app.js          # Client-side JavaScript
+├── uploads/            # Temporary file uploads
+├── server.js           # Express server & Socket.IO
+├── package.json        # Dependencies
+├── Dockerfile          # Docker configuration
+├── render.yaml         # Render.com config
+└── README.md           # This file
+```
+
+## 🎓 Educational Use Cases
+
+- **Entrepreneurship Classes**: Students pitch and vote on business ideas
+- **Business Competitions**: Evaluate startup pitches with peer voting
+- **Innovation Workshops**: Crowdsource feedback on project concepts
+- **Team Building**: Collaborative decision-making exercises
+
+## 🔒 Security Notes
+
+- Instructor password is stored in plain text (suitable for classroom use)
+- For production use, consider implementing proper authentication
+- Data is stored in memory and resets when server restarts
+- No persistent database means no data retention between sessions
+
+## 🤝 Contributing
+
+This is an educational project. Feel free to fork and modify for your needs!
+
+## 📝 License
+
+MIT License - Free to use for educational purposes
+
+## 🆘 Support
+
+For deployment help, see [DEPLOYMENT.md](DEPLOYMENT.md)
+
+For issues or questions, check the troubleshooting section in the deployment guide.
+
+---
+
+**Made for educators and students** 🎓
