@@ -255,13 +255,21 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (amount <= 0 || amount > user.remainingBudget) {
-      socket.emit('error', { message: 'Invalid investment amount' });
+    // Calculate previous investment in this company
+    const previousInvestment = user.investments[companyId] || 0;
+    
+    // Calculate available budget including the previous investment (which will be returned)
+    const availableBudget = user.remainingBudget + previousInvestment;
+
+    if (amount <= 0) {
+      socket.emit('error', { message: 'Investment amount must be greater than 0' });
       return;
     }
 
-    // Calculate previous investment in this company
-    const previousInvestment = user.investments[companyId] || 0;
+    if (amount > availableBudget) {
+      socket.emit('error', { message: `Insufficient budget. You have $${availableBudget.toLocaleString()} available (including your previous investment of $${previousInvestment.toLocaleString()})` });
+      return;
+    }
     
     // Update user's investment
     user.investments[companyId] = amount;
