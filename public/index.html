@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Investment Game</title>
+    <title>FOE2026 Angel Investor Game</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <!-- Role Selection Screen -->
     <div id="roleSelection" class="screen active">
         <div class="container">
-            <h1>🎯 Student Investment Game</h1>
+            <h1>🎯 FOE2026 Angel Investor Game</h1>
             <p class="subtitle">Select your role to begin</p>
             
             <div class="role-cards">
@@ -80,10 +80,21 @@
                 <div id="companiesList" class="companies-list"></div>
             </div>
 
+            <!-- Active Students -->
+            <div class="card" id="activeStudentsCard">
+                <h2>Active Students</h2>
+                <div id="activeStudentsList" class="active-students-list"></div>
+            </div>
+
             <!-- Live Leaderboard -->
             <div class="card">
                 <h2>Live Leaderboard</h2>
                 <div id="instructorLeaderboard" class="leaderboard"></div>
+                <div class="export-section" id="exportSection" style="display: none;">
+                    <button onclick="exportExcel()" class="btn btn-export">
+                        📊 Download Excel Report
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -92,7 +103,7 @@
     <div id="studentScreen" class="screen">
         <div class="container">
             <div class="header">
-                <h1>🎯 Student Investment Game</h1>
+                <h1>🎯 FOE2026 Angel Investor Game</h1>
                 <div class="user-info">
                     <span id="studentName"></span>
                 </div>
@@ -115,13 +126,14 @@
             <div id="votingInterface" class="card" style="display: none;">
                 <h2>Companies to Invest In</h2>
                 <p>Allocate your $200,000 budget across the companies below</p>
+                <p class="instruction-text">To change your investment or update your comment, simply re-type the number or comment.</p>
                 <div id="companiesGrid" class="companies-grid"></div>
             </div>
 
-            <!-- Live Leaderboard -->
+            <!-- Personal Portfolio -->
             <div class="card">
-                <h2>Live Leaderboard</h2>
-                <div id="studentLeaderboard" class="leaderboard"></div>
+                <h2>My Investments</h2>
+                <div id="personalPortfolio" class="personal-portfolio"></div>
             </div>
         </div>
     </div>

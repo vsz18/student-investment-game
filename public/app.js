@@ -145,13 +145,19 @@ function invest(companyId) {
         return;
     }
 
-    if (amount > currentUser.remainingBudget) {
+    if (amount > currentUser.remainingBudget + (currentUser.investments[companyId] || 0)) {
         showNotification('Insufficient budget', 'error');
         return;
     }
 
     socket.emit('invest', { companyId, amount });
-    input.value = '';
+}
+
+function addComment(companyId) {
+    const textarea = document.getElementById(`comment-${companyId}`);
+    const comment = textarea.value.trim();
+
+    socket.emit('addComment', { companyId, comment });
 }
 
 function displayCompaniesForVoting(companiesList) {
@@ -162,22 +168,80 @@ function displayCompaniesForVoting(companiesList) {
         return;
     }
 
-    container.innerHTML = companiesList.map(company => `
-        <div class="company-card">
-            <h3>${company.name}</h3>
-            <p>${company.description}</p>
-            <div class="investment-controls">
-                <input 
-                    type="number" 
-                    id="amount-${company.id}" 
-                    placeholder="Amount"
-                    min="0"
-                    step="1000"
-                >
-                <button onclick="invest('${company.id}')">Invest</button>
+    container.innerHTML = companiesList.map(company => {
+        const currentInvestment = currentUser.investments[company.id] || 0;
+        const existingComment = company.comments?.find(c => c.userId === currentUser.userId)?.comment || '';
+        
+        return `
+            <div class="company-card">
+                <h3>${company.name}</h3>
+                <p>${company.description}</p>
+                <div class="investment-controls">
+                    <div class="investment-input-group">
+                        <span class="currency-symbol">$</span>
+                        <input
+                            type="number"
+                            id="amount-${company.id}"
+                            placeholder="0"
+                            value="${currentInvestment || ''}"
+                            min="0"
+                            step="1000"
+                            class="investment-input"
+                        >
+                    </div>
+                    <button onclick="invest('${company.id}')" class="btn-invest">
+                        ${currentInvestment > 0 ? '✓ Update Investment' : '💰 Invest'}
+                    </button>
+                </div>
+                <div class="comment-section">
+                    <textarea
+                        id="comment-${company.id}"
+                        placeholder="Share your thoughts about this company (optional)..."
+                        rows="2"
+                        class="comment-textarea"
+                    >${existingComment}</textarea>
+                    <button onclick="addComment('${company.id}')" class="btn-comment">
+                        ${existingComment ? '✓ Update Comment' : '💬 Add Comment'}
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updatePersonalPortfolio(portfolio) {
+    const container = document.getElementById('personalPortfolio');
+    
+    if (!portfolio || portfolio.length === 0) {
+        container.innerHTML = '<p class="empty-state">No investments yet</p>';
+        return;
+    }
+
+    const totalInvested = portfolio.reduce((sum, item) => sum + item.amount, 0);
+
+    container.innerHTML = `
+        <div class="portfolio-summary">
+            <div class="portfolio-stat">
+                <span class="stat-label">Total Invested</span>
+                <span class="stat-value">$${totalInvested.toLocaleString()}</span>
+            </div>
+            <div class="portfolio-stat">
+                <span class="stat-label">Remaining Budget</span>
+                <span class="stat-value">$${currentUser.remainingBudget.toLocaleString()}</span>
             </div>
         </div>
-    `).join('');
+        <div class="portfolio-items">
+            ${portfolio.map(item => `
+                <div class="portfolio-item">
+                    <div class="portfolio-company">
+                        <h4>${item.name}</h4>
+                        ${item.comment ? `<p class="portfolio-comment">"${item.comment}"</p>` : ''}
+                    </div>
+                    <div class="portfolio-amount">$${item.amount.toLocaleString()}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
 
 function updateBudgetDisplay(budget) {
@@ -189,26 +253,102 @@ function updateBudgetDisplay(budget) {
 
 function updateLeaderboard(leaderboard) {
     const instructorBoard = document.getElementById('instructorLeaderboard');
-    const studentBoard = document.getElementById('studentLeaderboard');
     
-    const html = leaderboard.length === 0 
+    if (!instructorBoard) return;
+    
+    const html = leaderboard.length === 0
         ? '<p class="empty-state">No investments yet</p>'
         : leaderboard.map((company, index) => {
             const rankClass = index === 0 ? 'first' : index === 1 ? 'second' : index === 2 ? 'third' : '';
+            const commentsHtml = company.comments && company.comments.length > 0
+                ? `<div class="company-comments">
+                    <button class="comments-toggle" onclick="toggleComments('${company.id}')">
+                        <span class="toggle-icon" id="toggle-${company.id}">▶</span>
+                        Comments (${company.comments.length})
+                    </button>
+                    <div class="comments-list" id="comments-${company.id}" style="display: none;">
+                        ${company.comments.map(c => `
+                            <div class="comment-item">
+                                <p class="comment-text">"${c.comment}"</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                   </div>`
+                : '';
+            
             return `
                 <div class="leaderboard-item">
                     <div class="rank ${rankClass}">#${index + 1}</div>
                     <div class="company-info">
                         <h3>${company.name}</h3>
                         <p>${company.description}</p>
+                        ${commentsHtml}
                     </div>
                     <div class="investment-amount">$${company.totalInvestment.toLocaleString()}</div>
                 </div>
             `;
         }).join('');
 
-    if (instructorBoard) instructorBoard.innerHTML = html;
-    if (studentBoard) studentBoard.innerHTML = html;
+    instructorBoard.innerHTML = html;
+}
+
+function toggleComments(companyId) {
+    const commentsList = document.getElementById(`comments-${companyId}`);
+    const toggleIcon = document.getElementById(`toggle-${companyId}`);
+    
+    if (commentsList.style.display === 'none') {
+        commentsList.style.display = 'block';
+        toggleIcon.textContent = '▼';
+    } else {
+        commentsList.style.display = 'none';
+        toggleIcon.textContent = '▶';
+    }
+}
+
+function exportExcel() {
+    fetch('/api/export-excel')
+        .then(response => response.blob())
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `investment-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            showNotification('Excel report downloaded!', 'success');
+        })
+        .catch(error => {
+            console.error('Export error:', error);
+            showNotification('Failed to export report', 'error');
+        });
+}
+
+function updateActiveStudents(students) {
+    const container = document.getElementById('activeStudentsList');
+    
+    if (!container) return;
+    
+    if (students.length === 0) {
+        container.innerHTML = '<p class="empty-state">No students connected yet</p>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="students-count">Total Students: ${students.length}</div>
+        <div class="students-grid">
+            ${students.map(student => `
+                <div class="student-item">
+                    <div class="student-name">👨‍🎓 ${student.userName}</div>
+                    <div class="student-budget">
+                        <span class="budget-label">Remaining:</span>
+                        <span class="budget-value">$${student.remainingBudget.toLocaleString()}</span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
 
 function updatePhaseDisplay(phase) {
@@ -217,6 +357,24 @@ function updatePhaseDisplay(phase) {
     const phaseElement = document.getElementById('currentPhase');
     if (phaseElement) {
         phaseElement.textContent = phase.charAt(0).toUpperCase() + phase.slice(1);
+    }
+
+    // Update instructor view based on phase
+    if (currentRole === 'instructor') {
+        const activeStudentsCard = document.getElementById('activeStudentsCard');
+        const exportSection = document.getElementById('exportSection');
+        
+        if (phase === 'results') {
+            // Hide active students in results view
+            if (activeStudentsCard) activeStudentsCard.style.display = 'none';
+            // Show Excel export section
+            if (exportSection) exportSection.style.display = 'block';
+        } else {
+            // Show active students in other phases
+            if (activeStudentsCard) activeStudentsCard.style.display = 'block';
+            // Hide Excel export section
+            if (exportSection) exportSection.style.display = 'none';
+        }
     }
 
     // Update student view based on phase
@@ -292,8 +450,18 @@ socket.on('phaseChanged', (data) => {
 
 socket.on('investmentSuccess', (data) => {
     currentUser.remainingBudget = data.remainingBudget;
+    currentUser.investments[data.companyId] = data.amount;
     updateBudgetDisplay(currentUser.remainingBudget);
-    showNotification(`Investment of $${data.amount.toLocaleString()} successful!`, 'success');
+    updatePersonalPortfolio(data.personalPortfolio);
+    showNotification(`Investment updated to $${data.amount.toLocaleString()}!`, 'success');
+});
+
+socket.on('commentSuccess', (data) => {
+    showNotification('Comment saved!', 'success');
+});
+
+socket.on('activeStudentsUpdate', (students) => {
+    updateActiveStudents(students);
 });
 
 socket.on('leaderboardUpdate', (leaderboard) => {
@@ -315,6 +483,7 @@ socket.on('gameReset', (data) => {
     }
     
     updateLeaderboard([]);
+    updatePersonalPortfolio([]);
     showNotification('Game has been reset', 'success');
 });
 

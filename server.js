@@ -32,7 +32,7 @@ app.use(express.static('public'));
 // Game state
 let gameState = {
   phase: 'setup', // 'setup', 'voting', 'results'
-  companies: [], // { id, name, description, totalInvestment }
+  companies: [], // { id, name, description, totalInvestment, comments: [] }
   users: {}, // { socketId: { userId, userName, role, investments: {}, remainingBudget } }
   instructorId: null,
   INITIAL_BUDGET: 200000
@@ -69,7 +69,8 @@ app.post('/api/upload-companies', upload.single('file'), (req, res) => {
           id: uuidv4(),
           name: companyName.toString().trim(),
           description: description.toString().trim(),
-          totalInvestment: 0
+          totalInvestment: 0,
+          comments: []
         });
       }
     });
@@ -86,6 +87,74 @@ app.post('/api/upload-companies', upload.single('file'), (req, res) => {
     console.error('Error processing Excel file:', error);
     res.status(500).json({ error: 'Failed to process Excel file: ' + error.message });
   }
+// Excel export endpoint (instructor only)
+app.get('/api/export-excel', (req, res) => {
+  try {
+    const students = Object.values(gameState.users).filter(u => u.role === 'student');
+    
+    // Create data array for Excel
+    const excelData = [];
+    
+    // Add header row
+    excelData.push(['Student Name', 'Company Name', 'Investment Amount', 'Comment']);
+    
+    // Add data rows for each student's investments
+    students.forEach(student => {
+      const investments = Object.entries(student.investments);
+      
+      if (investments.length === 0) {
+        // Student made no investments
+        excelData.push([student.userName, 'No investments', 0, '']);
+      } else {
+        investments.forEach(([companyId, amount]) => {
+          const company = gameState.companies.find(c => c.id === companyId);
+          if (company) {
+            // Find student's comment for this company
+            const commentObj = company.comments.find(c => c.userId === student.userId);
+            const comment = commentObj ? commentObj.comment : '';
+            
+            excelData.push([
+              student.userName,
+              company.name,
+              amount,
+              comment
+            ]);
+          }
+        });
+      }
+    });
+    
+    // Create workbook and worksheet
+    const workbook = xlsx.utils.book_new();
+    const worksheet = xlsx.utils.aoa_to_sheet(excelData);
+    
+    // Set column widths
+    worksheet['!cols'] = [
+      { wch: 20 }, // Student Name
+      { wch: 30 }, // Company Name
+      { wch: 18 }, // Investment Amount
+      { wch: 50 }  // Comment
+    ];
+    
+    // Add worksheet to workbook
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Investment Report');
+    
+    // Generate Excel file buffer
+    const excelBuffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    
+    // Set response headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=investment-report-${new Date().toISOString().split('T')[0]}.xlsx`);
+    
+    // Send the Excel file
+    res.send(excelBuffer);
+    
+  } catch (error) {
+    console.error('Error generating Excel:', error);
+    res.status(500).json({ error: 'Failed to generate Excel: ' + error.message });
+  }
+});
+
 });
 
 // Socket.io connection handling
@@ -124,6 +193,22 @@ io.on('connection', (socket) => {
       user: gameState.users[socket.id],
       initialBudget: gameState.INITIAL_BUDGET
     });
+
+    // Send active students list to instructor
+    if (role === 'instructor') {
+      const activeStudents = Object.values(gameState.users)
+        .filter(u => u.role === 'student')
+        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+      socket.emit('activeStudentsUpdate', activeStudents);
+    }
+
+    // Notify instructor of new student
+    if (role === 'student' && gameState.instructorId) {
+      const activeStudents = Object.values(gameState.users)
+        .filter(u => u.role === 'student')
+        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+      io.to(gameState.instructorId).emit('activeStudentsUpdate', activeStudents);
+    }
 
     console.log(`User ${userName} joined as ${role}`);
   });
@@ -175,36 +260,114 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Calculate previous investment in this company
+    const previousInvestment = user.investments[companyId] || 0;
+    
     // Update user's investment
-    if (!user.investments[companyId]) {
-      user.investments[companyId] = 0;
-    }
-    user.investments[companyId] += amount;
-    user.remainingBudget -= amount;
+    user.investments[companyId] = amount;
+    const difference = amount - previousInvestment;
+    user.remainingBudget -= difference;
 
     // Update company's total investment
-    company.totalInvestment += amount;
+    company.totalInvestment += difference;
 
-    // Send confirmation to user
+    // Send confirmation to user with updated personal portfolio
+    const personalPortfolio = Object.entries(user.investments)
+      .map(([cId, amt]) => {
+        const comp = gameState.companies.find(c => c.id === cId);
+        return comp ? {
+          id: cId,
+          name: comp.name,
+          amount: amt,
+          comment: comp.comments.find(c => c.userId === user.userId)?.comment || ''
+        } : null;
+      })
+      .filter(Boolean);
+
     socket.emit('investmentSuccess', {
       companyId,
       amount,
-      remainingBudget: user.remainingBudget
+      remainingBudget: user.remainingBudget,
+      personalPortfolio
     });
 
-    // Broadcast updated leaderboard to all users
+    // Broadcast updated leaderboard to instructor only
     const leaderboard = gameState.companies
       .map(c => ({
         id: c.id,
         name: c.name,
         description: c.description,
-        totalInvestment: c.totalInvestment
+        totalInvestment: c.totalInvestment,
+        comments: c.comments
       }))
       .sort((a, b) => b.totalInvestment - a.totalInvestment);
 
-    io.emit('leaderboardUpdate', leaderboard);
+    if (gameState.instructorId) {
+      io.to(gameState.instructorId).emit('leaderboardUpdate', leaderboard);
+    }
+
+    // Update active students list for instructor
+    if (gameState.instructorId) {
+      const activeStudents = Object.values(gameState.users)
+        .filter(u => u.role === 'student')
+        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+      io.to(gameState.instructorId).emit('activeStudentsUpdate', activeStudents);
+    }
 
     console.log(`${user.userName} invested $${amount} in ${company.name}`);
+  });
+
+  // Handle adding/updating comment
+  socket.on('addComment', (data) => {
+    const user = gameState.users[socket.id];
+    
+    if (!user || user.role !== 'student') {
+      socket.emit('error', { message: 'Only students can add comments' });
+      return;
+    }
+
+    const { companyId, comment } = data;
+    const company = gameState.companies.find(c => c.id === companyId);
+
+    if (!company) {
+      socket.emit('error', { message: 'Company not found' });
+      return;
+    }
+
+    // Remove existing comment from this user if any
+    company.comments = company.comments.filter(c => c.userId !== user.userId);
+
+    // Add new comment if not empty
+    if (comment && comment.trim()) {
+      const investmentAmount = user.investments[companyId] || 0;
+      company.comments.push({
+        userId: user.userId,
+        userName: user.userName,
+        comment: comment.trim(),
+        investmentAmount,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Send confirmation to student
+    socket.emit('commentSuccess', { companyId, comment });
+
+    // Update instructor with new comments
+    if (gameState.instructorId) {
+      const leaderboard = gameState.companies
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          description: c.description,
+          totalInvestment: c.totalInvestment,
+          comments: c.comments
+        }))
+        .sort((a, b) => b.totalInvestment - a.totalInvestment);
+      
+      io.to(gameState.instructorId).emit('leaderboardUpdate', leaderboard);
+    }
+
+    console.log(`${user.userName} commented on ${company.name}`);
   });
 
   // Handle reset game (instructor only)
@@ -222,10 +385,8 @@ io.on('connection', (socket) => {
       }
     });
 
-    // Reset company investments
-    gameState.companies.forEach(company => {
-      company.totalInvestment = 0;
-    });
+    // Clear all companies (removes uploaded Excel data)
+    gameState.companies = [];
 
     // Reset phase
     gameState.phase = 'setup';
@@ -244,12 +405,22 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
+    const wasStudent = gameState.users[socket.id]?.role === 'student';
+    
     if (gameState.instructorId === socket.id) {
       gameState.instructorId = null;
       console.log('Instructor disconnected');
     }
     
     delete gameState.users[socket.id];
+
+    // Update active students list for instructor if a student disconnected
+    if (wasStudent && gameState.instructorId) {
+      const activeStudents = Object.values(gameState.users)
+        .filter(u => u.role === 'student')
+        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+      io.to(gameState.instructorId).emit('activeStudentsUpdate', activeStudents);
+    }
   });
 });
 
