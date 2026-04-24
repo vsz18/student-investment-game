@@ -138,10 +138,10 @@ function displayCompanies(companiesList) {
 // Student Functions
 function invest(companyId) {
     const input = document.getElementById(`amount-${companyId}`);
-    const amount = parseInt(input.value);
+    const amount = parseInt(input.value) || 0;
 
-    if (!amount || amount <= 0) {
-        showNotification('Please enter a valid amount', 'error');
+    if (amount < 0) {
+        showNotification('Investment amount cannot be negative', 'error');
         return;
     }
 
@@ -151,6 +151,12 @@ function invest(companyId) {
     }
 
     socket.emit('invest', { companyId, amount });
+}
+
+function removeInvestment(companyId) {
+    if (confirm('Are you sure you want to remove this investment?')) {
+        socket.emit('invest', { companyId, amount: 0 });
+    }
 }
 
 function addComment(companyId) {
@@ -237,7 +243,12 @@ function updatePersonalPortfolio(portfolio) {
                         <h4>${item.name}</h4>
                         ${item.comment ? `<p class="portfolio-comment">"${item.comment}"</p>` : ''}
                     </div>
-                    <div class="portfolio-amount">$${item.amount.toLocaleString()}</div>
+                    <div class="portfolio-actions">
+                        <div class="portfolio-amount">$${item.amount.toLocaleString()}</div>
+                        <button onclick="removeInvestment('${item.id}')" class="btn-remove" title="Remove investment">
+                            🗑️
+                        </button>
+                    </div>
                 </div>
             `).join('')}
         </div>

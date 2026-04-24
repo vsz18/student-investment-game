@@ -12,6 +12,21 @@ const io = socketIo(server);
 
 const PORT = process.env.PORT || 8080;
 
+// Configuration for 70 user capacity
+const MAX_CONNECTIONS = 70;
+const RATE_LIMIT_WINDOW = 1000; // 1 second
+const LEADERBOARD_UPDATE_INTERVAL = 2000; // 2 seconds
+
+// Connection tracking
+let activeConnections = 0;
+
+// Rate limiting storage
+const rateLimits = new Map(); // socketId -> { investments: timestamp[], comments: timestamp[] }
+
+// Debounced leaderboard update
+let leaderboardUpdateTimer = null;
+let pendingLeaderboardUpdate = false;
+
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
 const upload = multer({ 
@@ -157,9 +172,67 @@ app.get('/api/export-excel', (req, res) => {
 
 });
 
+// Helper function to check rate limit
+function checkRateLimit(socketId, action) {
+  if (!rateLimits.has(socketId)) {
+    rateLimits.set(socketId, { investments: [], comments: [] });
+  }
+  
+  const limits = rateLimits.get(socketId);
+  const now = Date.now();
+  
+  // Clean old timestamps (older than rate limit window)
+  limits[action] = limits[action].filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW);
+  
+  // Check if rate limit exceeded (max 1 action per second)
+  if (limits[action].length >= 1) {
+    return false;
+  }
+  
+  // Add current timestamp
+  limits[action].push(now);
+  return true;
+}
+
+// Debounced leaderboard update function
+function scheduleLeaderboardUpdate() {
+  if (leaderboardUpdateTimer) {
+    return; // Update already scheduled
+  }
+  
+  leaderboardUpdateTimer = setTimeout(() => {
+    if (gameState.instructorId) {
+      const leaderboard = gameState.companies
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          description: c.description,
+          totalInvestment: c.totalInvestment,
+          comments: c.comments
+        }))
+        .sort((a, b) => b.totalInvestment - a.totalInvestment);
+      
+      io.to(gameState.instructorId).emit('leaderboardUpdate', leaderboard);
+    }
+    
+    leaderboardUpdateTimer = null;
+  }, LEADERBOARD_UPDATE_INTERVAL);
+}
+
 // Socket.io connection handling
 io.on('connection', (socket) => {
-  console.log('New user connected:', socket.id);
+  // Check connection limit
+  if (activeConnections >= MAX_CONNECTIONS) {
+    console.log('Connection rejected - max capacity reached:', socket.id);
+    socket.emit('error', {
+      message: `Server is at maximum capacity (${MAX_CONNECTIONS} users). Please try again later.`
+    });
+    socket.disconnect(true);
+    return;
+  }
+  
+  activeConnections++;
+  console.log(`New user connected: ${socket.id} (${activeConnections}/${MAX_CONNECTIONS})`);
 
   // Handle role selection
   socket.on('selectRole', (data) => {
@@ -246,6 +319,12 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: 'Voting is not currently active' });
       return;
     }
+    
+    // Rate limiting check
+    if (!checkRateLimit(socket.id, 'investments')) {
+      socket.emit('error', { message: 'Please wait a moment before making another investment' });
+      return;
+    }
 
     const { companyId, amount } = data;
     const company = gameState.companies.find(c => c.id === companyId);
@@ -261,23 +340,32 @@ io.on('connection', (socket) => {
     // Calculate available budget including the previous investment (which will be returned)
     const availableBudget = user.remainingBudget + previousInvestment;
 
-    if (amount <= 0) {
-      socket.emit('error', { message: 'Investment amount must be greater than 0' });
+    if (amount < 0) {
+      socket.emit('error', { message: 'Investment amount cannot be negative' });
       return;
     }
 
-    if (amount > availableBudget) {
-      socket.emit('error', { message: `Insufficient budget. You have $${availableBudget.toLocaleString()} available (including your previous investment of $${previousInvestment.toLocaleString()})` });
-      return;
+    // Allow amount to be 0 to remove investment
+    if (amount === 0) {
+      // Remove the investment entirely
+      delete user.investments[companyId];
+      user.remainingBudget += previousInvestment;
+      company.totalInvestment -= previousInvestment;
+    } else {
+      // Normal investment update
+      if (amount > availableBudget) {
+        socket.emit('error', { message: `Insufficient budget. You have $${availableBudget.toLocaleString()} available (including your previous investment of $${previousInvestment.toLocaleString()})` });
+        return;
+      }
+      
+      // Update user's investment
+      user.investments[companyId] = amount;
+      const difference = amount - previousInvestment;
+      user.remainingBudget -= difference;
+      
+      // Update company's total investment
+      company.totalInvestment += difference;
     }
-    
-    // Update user's investment
-    user.investments[companyId] = amount;
-    const difference = amount - previousInvestment;
-    user.remainingBudget -= difference;
-
-    // Update company's total investment
-    company.totalInvestment += difference;
 
     // Send confirmation to user with updated personal portfolio
     const personalPortfolio = Object.entries(user.investments)
@@ -299,20 +387,8 @@ io.on('connection', (socket) => {
       personalPortfolio
     });
 
-    // Broadcast updated leaderboard to instructor only
-    const leaderboard = gameState.companies
-      .map(c => ({
-        id: c.id,
-        name: c.name,
-        description: c.description,
-        totalInvestment: c.totalInvestment,
-        comments: c.comments
-      }))
-      .sort((a, b) => b.totalInvestment - a.totalInvestment);
-
-    if (gameState.instructorId) {
-      io.to(gameState.instructorId).emit('leaderboardUpdate', leaderboard);
-    }
+    // Schedule debounced leaderboard update instead of immediate broadcast
+    scheduleLeaderboardUpdate();
 
     // Update active students list for instructor
     if (gameState.instructorId) {
@@ -331,6 +407,12 @@ io.on('connection', (socket) => {
     
     if (!user || user.role !== 'student') {
       socket.emit('error', { message: 'Only students can add comments' });
+      return;
+    }
+    
+    // Rate limiting check
+    if (!checkRateLimit(socket.id, 'comments')) {
+      socket.emit('error', { message: 'Please wait a moment before adding another comment' });
       return;
     }
 
@@ -360,20 +442,8 @@ io.on('connection', (socket) => {
     // Send confirmation to student
     socket.emit('commentSuccess', { companyId, comment });
 
-    // Update instructor with new comments
-    if (gameState.instructorId) {
-      const leaderboard = gameState.companies
-        .map(c => ({
-          id: c.id,
-          name: c.name,
-          description: c.description,
-          totalInvestment: c.totalInvestment,
-          comments: c.comments
-        }))
-        .sort((a, b) => b.totalInvestment - a.totalInvestment);
-      
-      io.to(gameState.instructorId).emit('leaderboardUpdate', leaderboard);
-    }
+    // Schedule debounced leaderboard update
+    scheduleLeaderboardUpdate();
 
     console.log(`${user.userName} commented on ${company.name}`);
   });
@@ -411,7 +481,8 @@ io.on('connection', (socket) => {
 
   // Handle disconnect
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    activeConnections--;
+    console.log(`User disconnected: ${socket.id} (${activeConnections}/${MAX_CONNECTIONS})`);
     
     const wasStudent = gameState.users[socket.id]?.role === 'student';
     
@@ -419,6 +490,9 @@ io.on('connection', (socket) => {
       gameState.instructorId = null;
       console.log('Instructor disconnected');
     }
+    
+    // Clean up rate limit data
+    rateLimits.delete(socket.id);
     
     delete gameState.users[socket.id];
 
