@@ -8,17 +8,29 @@ const xlsx = require('xlsx');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = socketIo(server, {
+  // Optimize for classroom with many users from same IP
+  pingTimeout: 60000, // 60 seconds before considering connection dead
+  pingInterval: 25000, // Check connection health every 25 seconds
+  upgradeTimeout: 30000, // 30 seconds to complete WebSocket upgrade
+  maxHttpBufferSize: 1e6, // 1MB max message size
+  transports: ['websocket', 'polling'], // Prefer WebSocket, fallback to polling
+  cors: {
+    origin: "*", // Allow all origins (adjust for production)
+    methods: ["GET", "POST"]
+  }
+});
 
 const PORT = process.env.PORT || 8080;
 
-// Configuration for 70 user capacity
-const MAX_CONNECTIONS = 70;
-const RATE_LIMIT_WINDOW = 1000; // 1 second
-const LEADERBOARD_UPDATE_INTERVAL = 2000; // 2 seconds
+// Configuration for 100 user capacity
+const MAX_CONNECTIONS = 100;
+const RATE_LIMIT_WINDOW = 500; // 0.5 seconds (faster for more users)
+const LEADERBOARD_UPDATE_INTERVAL = 1000; // 1 second (faster updates)
 
 // Connection tracking
 let activeConnections = 0;
+const connectionsPerIP = new Map(); // Track connections per IP for monitoring
 
 // Rate limiting storage
 const rateLimits = new Map(); // socketId -> { investments: timestamp[], comments: timestamp[] }
@@ -117,6 +129,8 @@ app.post('/api/upload-companies', upload.single('file'), (req, res) => {
     console.error('Error processing Excel file:', error);
     res.status(500).json({ error: 'Failed to process Excel file: ' + error.message });
   }
+});
+
 // Excel export endpoint (instructor only)
 app.get('/api/export-excel', (req, res) => {
   try {
@@ -185,8 +199,6 @@ app.get('/api/export-excel', (req, res) => {
   }
 });
 
-});
-
 // Helper function to check rate limit
 function checkRateLimit(socketId, action) {
   if (!rateLimits.has(socketId)) {
@@ -199,8 +211,8 @@ function checkRateLimit(socketId, action) {
   // Clean old timestamps (older than rate limit window)
   limits[action] = limits[action].filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW);
   
-  // Check if rate limit exceeded (max 1 action per second)
-  if (limits[action].length >= 1) {
+  // Check if rate limit exceeded (max 2 actions per 0.5 seconds)
+  if (limits[action].length >= 2) {
     return false;
   }
   
@@ -236,10 +248,15 @@ function scheduleLeaderboardUpdate() {
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
+  // Get client IP address (handles proxies)
+  const clientIP = socket.handshake.headers['x-forwarded-for']?.split(',')[0].trim() ||
+                   socket.handshake.headers['x-real-ip'] ||
+                   socket.handshake.address;
+  
   // Check connection limit
   if (activeConnections >= MAX_CONNECTIONS) {
-    console.log('Connection rejected - max capacity reached:', socket.id);
-    socket.emit('error', {
+    console.log(`Connection rejected - max capacity reached: ${socket.id} from IP ${clientIP}`);
+    socket.emit('connectionError', {
       message: `Server is at maximum capacity (${MAX_CONNECTIONS} users). Please try again later.`
     });
     socket.disconnect(true);
@@ -247,7 +264,15 @@ io.on('connection', (socket) => {
   }
   
   activeConnections++;
-  console.log(`New user connected: ${socket.id} (${activeConnections}/${MAX_CONNECTIONS})`);
+  
+  // Track connections per IP (for monitoring only, not blocking)
+  if (!connectionsPerIP.has(clientIP)) {
+    connectionsPerIP.set(clientIP, new Set());
+  }
+  connectionsPerIP.get(clientIP).add(socket.id);
+  
+  const ipConnectionCount = connectionsPerIP.get(clientIP).size;
+  console.log(`New user connected: ${socket.id} from IP ${clientIP} (${ipConnectionCount} from this IP, ${activeConnections}/${MAX_CONNECTIONS} total)`);
 
   // Handle role selection
   socket.on('selectRole', (data) => {
@@ -556,7 +581,22 @@ io.on('connection', (socket) => {
   // Handle disconnect
   socket.on('disconnect', () => {
     activeConnections--;
-    console.log(`User disconnected: ${socket.id} (${activeConnections}/${MAX_CONNECTIONS})`);
+    
+    // Get client IP for cleanup
+    const clientIP = socket.handshake.headers['x-forwarded-for']?.split(',')[0].trim() ||
+                     socket.handshake.headers['x-real-ip'] ||
+                     socket.handshake.address;
+    
+    // Clean up IP tracking
+    if (connectionsPerIP.has(clientIP)) {
+      connectionsPerIP.get(clientIP).delete(socket.id);
+      if (connectionsPerIP.get(clientIP).size === 0) {
+        connectionsPerIP.delete(clientIP);
+      }
+    }
+    
+    const ipConnectionCount = connectionsPerIP.get(clientIP)?.size || 0;
+    console.log(`User disconnected: ${socket.id} from IP ${clientIP} (${ipConnectionCount} remaining from this IP, ${activeConnections}/${MAX_CONNECTIONS} total)`);
     
     const user = gameState.users[socket.id];
     const wasStudent = user?.role === 'student';
