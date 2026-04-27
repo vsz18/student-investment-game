@@ -283,7 +283,7 @@ io.on('connection', (socket) => {
 
   // Handle role selection
   socket.on('selectRole', (data) => {
-    const { role, userName, sessionId } = data;
+    const { role, userName, sessionId, studentId } = data;
     
     // Check if instructor role is already taken by a DIFFERENT active session
     if (role === 'instructor') {
@@ -319,15 +319,61 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Initialize user
-    const userId = uuidv4();
-    gameState.users[socket.id] = {
-      userId,
-      userName: userName || 'Anonymous',
-      role: role,
-      investments: {},
-      remainingBudget: gameState.INITIAL_BUDGET
-    };
+    // Handle student login
+    if (role === 'student' && studentId) {
+      // Check if this EXACT studentId is already connected (same session reconnecting)
+      const existingStudent = Object.entries(gameState.users).find(
+        ([socketId, user]) => user.role === 'student' && user.studentId === studentId
+      );
+      
+      if (existingStudent) {
+        const [oldSocketId, oldUser] = existingStudent;
+        console.log(`Student ${userName} reconnecting with same session (ID: ${studentId}) - removing old socket ${oldSocketId}, using new socket ${socket.id}`);
+        
+        // Transfer data from old socket to new socket
+        const userId = oldUser.userId; // Keep same userId
+        gameState.users[socket.id] = {
+          userId,
+          userName: userName || 'Anonymous',
+          role: role,
+          studentId: studentId,
+          investments: oldUser.investments,
+          remainingBudget: oldUser.remainingBudget
+        };
+        
+        // Remove old socket entry
+        delete gameState.users[oldSocketId];
+        
+        // Disconnect old socket if still connected
+        const oldSocket = io.sockets.sockets.get(oldSocketId);
+        if (oldSocket) {
+          oldSocket.disconnect(true);
+        }
+      } else {
+        // New student login - create fresh entry
+        const userId = uuidv4();
+        gameState.users[socket.id] = {
+          userId,
+          userName: userName || 'Anonymous',
+          role: role,
+          studentId: studentId,
+          investments: {},
+          remainingBudget: gameState.INITIAL_BUDGET
+        };
+        console.log(`New student ${userName} joined (ID: ${studentId})`);
+      }
+    } else {
+      // Initialize user (instructor or student without studentId)
+      const userId = uuidv4();
+      gameState.users[socket.id] = {
+        userId,
+        userName: userName || 'Anonymous',
+        role: role,
+        studentId: studentId || null,
+        investments: {},
+        remainingBudget: gameState.INITIAL_BUDGET
+      };
+    }
 
     if (role === 'instructor') {
       gameState.instructorId = socket.id;
@@ -504,7 +550,7 @@ io.on('connection', (socket) => {
       io.to(gameState.instructorId).emit('activeStudentsUpdate', activeStudents);
     }
 
-    console.log(`${user.userName} invested $${amount} in ${company.name}`);
+    console.log(`${user.userName} (ID: ${user.studentId || 'N/A'}) invested $${amount} in ${company.name}`);
   });
 
   // Handle adding/updating comment
@@ -561,11 +607,28 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Reset all user investments and budgets
-    Object.values(gameState.users).forEach(user => {
-      if (user.role === 'student') {
-        user.investments = {};
-        user.remainingBudget = gameState.INITIAL_BUDGET;
+    // Get all student socket IDs before clearing
+    const studentSocketIds = Object.keys(gameState.users).filter(
+      socketId => gameState.users[socketId].role === 'student'
+    );
+
+    // Disconnect all students
+    studentSocketIds.forEach(studentSocketId => {
+      const studentSocket = io.sockets.sockets.get(studentSocketId);
+      if (studentSocket) {
+        // Send disconnect message first
+        studentSocket.emit('forceDisconnect', {
+          message: 'Game has been reset by instructor. Please reconnect to join the new game.'
+        });
+        // Disconnect the student
+        studentSocket.disconnect(true);
+      }
+    });
+
+    // Clear all user data (students will be removed by disconnect handler)
+    Object.keys(gameState.users).forEach(socketId => {
+      if (gameState.users[socketId].role === 'student') {
+        delete gameState.users[socketId];
       }
     });
 
@@ -575,14 +638,14 @@ io.on('connection', (socket) => {
     // Reset phase
     gameState.phase = 'setup';
 
-    // Broadcast reset to all users
-    io.emit('gameReset', {
+    // Broadcast reset to instructor only (students are disconnected)
+    socket.emit('gameReset', {
       phase: gameState.phase,
       companies: gameState.companies,
       initialBudget: gameState.INITIAL_BUDGET
     });
 
-    console.log('Game reset by instructor');
+    console.log(`Game reset by instructor - ${studentSocketIds.length} students disconnected`);
   });
 
   // Handle disconnect
