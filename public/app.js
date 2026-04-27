@@ -4,6 +4,7 @@ let currentRole = null;
 let currentUser = null;
 let companies = [];
 let currentPhase = 'setup';
+let instructorSessionId = null; // Store instructor session ID for recovery
 
 // Role Selection
 function selectRole(role) {
@@ -42,8 +43,15 @@ function submitName() {
             return;
         }
         
+        // Check for existing session ID in localStorage
+        const storedSessionId = localStorage.getItem('instructorSessionId');
+        
         // Password correct, use "Instructor" as the name
-        socket.emit('selectRole', { role: currentRole, userName: 'Instructor' });
+        socket.emit('selectRole', {
+            role: currentRole,
+            userName: 'Instructor',
+            sessionId: storedSessionId
+        });
     } else {
         // Student enters their name
         const userName = document.getElementById('userName').value.trim();
@@ -346,12 +354,21 @@ function updateActiveStudents(students) {
         return;
     }
 
+    const totalInvested = students.reduce((sum, s) => sum + (s.totalInvested || 0), 0);
+
     container.innerHTML = `
-        <div class="students-count">Total Students: ${students.length}</div>
+        <div class="students-count">
+            <div>Total Students: ${students.length}</div>
+            <div style="font-size: 0.9em; color: #666;">Total Invested: $${totalInvested.toLocaleString()}</div>
+        </div>
         <div class="students-grid">
             ${students.map(student => `
                 <div class="student-item">
                     <div class="student-name">👨‍🎓 ${student.userName}</div>
+                    <div class="student-budget">
+                        <span class="budget-label">Invested:</span>
+                        <span class="budget-value" style="color: #4CAF50;">$${(student.totalInvested || 0).toLocaleString()}</span>
+                    </div>
                     <div class="student-budget">
                         <span class="budget-label">Remaining:</span>
                         <span class="budget-value">$${student.remainingBudget.toLocaleString()}</span>
@@ -411,18 +428,31 @@ socket.on('roleAccepted', (data) => {
     currentPhase = data.phase;
 
     if (data.role === 'instructor') {
+        // Store session ID for recovery
+        if (data.sessionId) {
+            instructorSessionId = data.sessionId;
+            localStorage.setItem('instructorSessionId', data.sessionId);
+        }
+        
         showScreen('instructorScreen');
         document.getElementById('instructorName').textContent = `👨‍🏫 ${currentUser.userName}`;
         updatePhaseDisplay(data.phase);
         displayCompanies(companies);
+        
+        // Show recovery message if this was a session recovery
+        const storedSessionId = localStorage.getItem('instructorSessionId');
+        if (storedSessionId === data.sessionId && companies.length > 0) {
+            showNotification('Session recovered! Your previous data has been restored.', 'success');
+        } else {
+            showNotification(`Welcome, ${currentUser.userName}!`, 'success');
+        }
     } else {
         showScreen('studentScreen');
         document.getElementById('studentName').textContent = `👨‍🎓 ${currentUser.userName}`;
         updateBudgetDisplay(currentUser.remainingBudget);
         updatePhaseDisplay(data.phase);
+        showNotification(`Welcome, ${currentUser.userName}!`, 'success');
     }
-
-    showNotification(`Welcome, ${currentUser.userName}!`, 'success');
 });
 
 socket.on('roleError', (data) => {

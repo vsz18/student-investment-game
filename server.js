@@ -50,7 +50,16 @@ let gameState = {
   companies: [], // { id, name, description, totalInvestment, comments: [] }
   users: {}, // { socketId: { userId, userName, role, investments: {}, remainingBudget } }
   instructorId: null,
+  instructorSessionId: null, // Unique session ID for instructor
   INITIAL_BUDGET: 200000
+};
+
+// Store instructor session data for recovery
+let instructorSession = {
+  sessionId: null,
+  lastActive: null,
+  companies: [],
+  phase: 'setup'
 };
 
 // Serve static files
@@ -90,13 +99,19 @@ app.post('/api/upload-companies', upload.single('file'), (req, res) => {
       }
     });
 
+    // Save to instructor session
+    if (instructorSession.sessionId) {
+      instructorSession.companies = gameState.companies;
+      instructorSession.lastActive = Date.now();
+    }
+
     // Broadcast updated companies to all clients
     io.emit('companiesUpdated', gameState.companies);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `Successfully loaded ${gameState.companies.length} companies`,
-      companies: gameState.companies 
+      companies: gameState.companies
     });
   } catch (error) {
     console.error('Error processing Excel file:', error);
@@ -236,12 +251,40 @@ io.on('connection', (socket) => {
 
   // Handle role selection
   socket.on('selectRole', (data) => {
-    const { role, userName } = data;
+    const { role, userName, sessionId } = data;
     
-    // Check if instructor role is already taken
-    if (role === 'instructor' && gameState.instructorId && gameState.instructorId !== socket.id) {
-      socket.emit('roleError', { message: 'Instructor role is already taken' });
-      return;
+    // Check if instructor role is already taken by a DIFFERENT active session
+    if (role === 'instructor') {
+      if (gameState.instructorId && gameState.instructorId !== socket.id) {
+        // Check if the existing instructor is still connected
+        const existingInstructor = io.sockets.sockets.get(gameState.instructorId);
+        if (existingInstructor && existingInstructor.connected) {
+          socket.emit('roleError', {
+            message: 'Instructor role is already taken by an active session. Please wait for them to disconnect or use the same session.'
+          });
+          return;
+        } else {
+          // Previous instructor disconnected without cleanup, allow takeover
+          console.log('Previous instructor session was stale, allowing new instructor');
+          gameState.instructorId = null;
+        }
+      }
+      
+      // Check for session recovery
+      if (sessionId && instructorSession.sessionId === sessionId) {
+        // Restore previous session
+        console.log('Restoring instructor session:', sessionId);
+        gameState.companies = instructorSession.companies;
+        gameState.phase = instructorSession.phase;
+      } else {
+        // New instructor session
+        const newSessionId = uuidv4();
+        gameState.instructorSessionId = newSessionId;
+        instructorSession.sessionId = newSessionId;
+        instructorSession.companies = gameState.companies;
+        instructorSession.phase = gameState.phase;
+        instructorSession.lastActive = Date.now();
+      }
     }
 
     // Initialize user
@@ -264,22 +307,43 @@ io.on('connection', (socket) => {
       phase: gameState.phase,
       companies: gameState.companies,
       user: gameState.users[socket.id],
-      initialBudget: gameState.INITIAL_BUDGET
+      initialBudget: gameState.INITIAL_BUDGET,
+      sessionId: role === 'instructor' ? gameState.instructorSessionId : undefined
     });
 
     // Send active students list to instructor
     if (role === 'instructor') {
       const activeStudents = Object.values(gameState.users)
         .filter(u => u.role === 'student')
-        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+        .map(u => ({
+          userName: u.userName,
+          remainingBudget: u.remainingBudget,
+          totalInvested: Object.values(u.investments).reduce((sum, amt) => sum + amt, 0)
+        }));
       socket.emit('activeStudentsUpdate', activeStudents);
+      
+      // Send current leaderboard immediately
+      const leaderboard = gameState.companies
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          description: c.description,
+          totalInvestment: c.totalInvestment,
+          comments: c.comments
+        }))
+        .sort((a, b) => b.totalInvestment - a.totalInvestment);
+      socket.emit('leaderboardUpdate', leaderboard);
     }
 
     // Notify instructor of new student
     if (role === 'student' && gameState.instructorId) {
       const activeStudents = Object.values(gameState.users)
         .filter(u => u.role === 'student')
-        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+        .map(u => ({
+          userName: u.userName,
+          remainingBudget: u.remainingBudget,
+          totalInvested: Object.values(u.investments).reduce((sum, amt) => sum + amt, 0)
+        }));
       io.to(gameState.instructorId).emit('activeStudentsUpdate', activeStudents);
     }
 
@@ -294,6 +358,12 @@ io.on('connection', (socket) => {
     }
 
     gameState.phase = newPhase;
+    
+    // Save to instructor session
+    if (instructorSession.sessionId) {
+      instructorSession.phase = newPhase;
+      instructorSession.lastActive = Date.now();
+    }
     
     // Broadcast phase change to all users
     io.emit('phaseChanged', { phase: newPhase });
@@ -394,7 +464,11 @@ io.on('connection', (socket) => {
     if (gameState.instructorId) {
       const activeStudents = Object.values(gameState.users)
         .filter(u => u.role === 'student')
-        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+        .map(u => ({
+          userName: u.userName,
+          remainingBudget: u.remainingBudget,
+          totalInvested: Object.values(u.investments).reduce((sum, amt) => sum + amt, 0)
+        }));
       io.to(gameState.instructorId).emit('activeStudentsUpdate', activeStudents);
     }
 
@@ -484,11 +558,20 @@ io.on('connection', (socket) => {
     activeConnections--;
     console.log(`User disconnected: ${socket.id} (${activeConnections}/${MAX_CONNECTIONS})`);
     
-    const wasStudent = gameState.users[socket.id]?.role === 'student';
+    const user = gameState.users[socket.id];
+    const wasStudent = user?.role === 'student';
+    const wasInstructor = gameState.instructorId === socket.id;
     
-    if (gameState.instructorId === socket.id) {
-      gameState.instructorId = null;
-      console.log('Instructor disconnected');
+    if (wasInstructor) {
+      // Don't clear instructorId immediately - allow for reconnection
+      console.log('Instructor disconnected - session preserved for reconnection');
+      // Set a timeout to clear the instructor after 5 minutes of inactivity
+      setTimeout(() => {
+        if (gameState.instructorId === socket.id) {
+          gameState.instructorId = null;
+          console.log('Instructor session expired');
+        }
+      }, 300000); // 5 minutes
     }
     
     // Clean up rate limit data
@@ -500,7 +583,11 @@ io.on('connection', (socket) => {
     if (wasStudent && gameState.instructorId) {
       const activeStudents = Object.values(gameState.users)
         .filter(u => u.role === 'student')
-        .map(u => ({ userName: u.userName, remainingBudget: u.remainingBudget }));
+        .map(u => ({
+          userName: u.userName,
+          remainingBudget: u.remainingBudget,
+          totalInvested: Object.values(u.investments).reduce((sum, amt) => sum + amt, 0)
+        }));
       io.to(gameState.instructorId).emit('activeStudentsUpdate', activeStudents);
     }
   });
