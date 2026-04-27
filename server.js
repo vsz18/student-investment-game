@@ -9,10 +9,10 @@ const xlsx = require('xlsx');
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-  // EMERGENCY FIX: More lenient timeouts for mass disconnection issue
-  pingTimeout: 120000, // 120 seconds (2 minutes) - was 60s
-  pingInterval: 45000, // 45 seconds - was 25s
-  upgradeTimeout: 60000, // 60 seconds - was 30s
+  // LONG SESSION FIX: Settings for 3+ hour class sessions
+  pingTimeout: 14400000, // 4 hours (14400 seconds) - covers full 3-hour class + buffer
+  pingInterval: 300000, // 5 minutes (300 seconds) - check connection every 5 minutes
+  upgradeTimeout: 60000, // 60 seconds - time to upgrade connection
   maxHttpBufferSize: 1e6, // 1MB max message size
   transports: ['websocket', 'polling'], // Prefer WebSocket, fallback to polling
   allowEIO3: true, // Allow older clients
@@ -20,9 +20,12 @@ const io = socketIo(server, {
     origin: "*", // Allow all origins
     methods: ["GET", "POST"]
   },
-  // Additional stability settings
+  // Additional stability settings for long sessions
   connectTimeout: 60000, // 60 seconds to establish connection
-  perMessageDeflate: false // Disable compression to reduce CPU load
+  perMessageDeflate: false, // Disable compression to reduce CPU load
+  // Critical for long sessions: allow connections to stay idle
+  allowUpgrades: true, // Allow transport upgrades
+  cookie: false // Don't use cookies (can cause issues with long sessions)
 });
 
 const PORT = process.env.PORT || 8080;

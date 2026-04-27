@@ -349,6 +349,12 @@ function updateActiveStudents(students) {
     
     if (!container) return;
     
+    // Update connection status count
+    const studentsCount = document.getElementById('studentsCount');
+    if (studentsCount) {
+        studentsCount.textContent = students.length;
+    }
+    
     if (students.length === 0) {
         container.innerHTML = '<p class="empty-state">No students connected yet</p>';
         return;
@@ -534,10 +540,41 @@ socket.on('error', (data) => {
 
 socket.on('disconnect', () => {
     showNotification('Disconnected from server', 'error');
+    updateConnectionStatus(false);
 });
 
 socket.on('connect', () => {
     console.log('Connected to server');
+    updateConnectionStatus(true);
 });
+
+// Connection status monitoring (instructor only)
+function updateConnectionStatus(isConnected) {
+    if (currentRole !== 'instructor') return;
+    
+    const instructorStatus = document.getElementById('instructorStatus');
+    const lastPingTime = document.getElementById('lastPingTime');
+    
+    if (!instructorStatus) return;
+    
+    if (isConnected) {
+        instructorStatus.innerHTML = '<span class="status-dot connected"></span> Connected';
+        const now = new Date();
+        lastPingTime.textContent = now.toLocaleTimeString();
+    } else {
+        instructorStatus.innerHTML = '<span class="status-dot disconnected"></span> Disconnected';
+    }
+}
+
+// Update connection status periodically
+setInterval(() => {
+    if (currentRole === 'instructor' && socket.connected) {
+        const lastPingTime = document.getElementById('lastPingTime');
+        if (lastPingTime) {
+            const now = new Date();
+            lastPingTime.textContent = now.toLocaleTimeString();
+        }
+    }
+}, 5000); // Update every 5 seconds
 
 // Made with Bob

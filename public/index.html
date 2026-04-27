@@ -80,6 +80,28 @@
                 <div id="companiesList" class="companies-list"></div>
             </div>
 
+            <!-- Connection Status (Instructor Only) -->
+            <div class="card" id="connectionStatusCard">
+                <h2>Connection Status</h2>
+                <div id="connectionStatusList" class="connection-status-list">
+                    <div class="status-item">
+                        <span class="status-label">Instructor:</span>
+                        <span class="status-indicator" id="instructorStatus">
+                            <span class="status-dot connected"></span> Connected
+                        </span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Students:</span>
+                        <span class="status-indicator" id="studentsStatus">
+                            <span class="status-dot connected"></span> <span id="studentsCount">0</span> connected
+                        </span>
+                    </div>
+                    <div class="status-details">
+                        <small>Last ping: <span id="lastPingTime">--</span></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Active Students -->
             <div class="card" id="activeStudentsCard">
                 <h2>Active Students</h2>
