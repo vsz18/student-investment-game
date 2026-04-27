@@ -9,16 +9,20 @@ const xlsx = require('xlsx');
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-  // Optimize for classroom with many users from same IP
-  pingTimeout: 60000, // 60 seconds before considering connection dead
-  pingInterval: 25000, // Check connection health every 25 seconds
-  upgradeTimeout: 30000, // 30 seconds to complete WebSocket upgrade
+  // EMERGENCY FIX: More lenient timeouts for mass disconnection issue
+  pingTimeout: 120000, // 120 seconds (2 minutes) - was 60s
+  pingInterval: 45000, // 45 seconds - was 25s
+  upgradeTimeout: 60000, // 60 seconds - was 30s
   maxHttpBufferSize: 1e6, // 1MB max message size
   transports: ['websocket', 'polling'], // Prefer WebSocket, fallback to polling
+  allowEIO3: true, // Allow older clients
   cors: {
-    origin: "*", // Allow all origins (adjust for production)
+    origin: "*", // Allow all origins
     methods: ["GET", "POST"]
-  }
+  },
+  // Additional stability settings
+  connectTimeout: 60000, // 60 seconds to establish connection
+  perMessageDeflate: false // Disable compression to reduce CPU load
 });
 
 const PORT = process.env.PORT || 8080;
