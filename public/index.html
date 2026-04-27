@@ -47,8 +47,11 @@
         <div class="container">
             <div class="header">
                 <h1>🎯 Instructor Dashboard</h1>
-                <div class="user-info">
-                    <span id="instructorName"></span>
+                <div class="user-info-container">
+                    <div class="name-box">
+                        <span id="instructorName"></span>
+                    </div>
+                    <button onclick="logout()" class="btn-logout" title="Logout">🚪 Logout</button>
                 </div>
             </div>
 
@@ -126,8 +129,12 @@
         <div class="container">
             <div class="header">
                 <h1>🎯 FOE2026 Angel Investor Game</h1>
-                <div class="user-info">
-                    <span id="studentName"></span>
+                <div class="user-info-container">
+                    <div class="name-box">
+                        <span id="studentName"></span>
+                        <button onclick="changeName()" class="btn-edit-name" title="Change Name">✏️</button>
+                    </div>
+                    <button onclick="logout()" class="btn-logout" title="Logout">🚪 Logout</button>
                 </div>
             </div>
 

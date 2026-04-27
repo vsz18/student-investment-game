@@ -18,9 +18,6 @@ let heartbeatWarningShown = false;
 
 // Check for previous session on page load
 window.addEventListener('DOMContentLoaded', () => {
-    // Detect incognito/private browsing mode
-    detectIncognitoMode();
-    
     // Check for instructor session
     const storedInstructorSessionId = localStorage.getItem('instructorSessionId');
     if (storedInstructorSessionId) {
@@ -38,62 +35,6 @@ window.addEventListener('DOMContentLoaded', () => {
         return;
     }
 });
-
-// Detect incognito/private browsing mode
-function detectIncognitoMode() {
-    // Test if localStorage persists
-    const testKey = '__incognito_test__';
-    try {
-        localStorage.setItem(testKey, '1');
-        localStorage.removeItem(testKey);
-        
-        // Additional check: try to detect private mode in different browsers
-        if (window.indexedDB) {
-            // Try to open a database - fails in some incognito modes
-            const db = indexedDB.open('test');
-            db.onerror = () => {
-                showIncognitoWarning();
-            };
-        }
-        
-        // Safari private mode detection
-        try {
-            window.openDatabase(null, null, null, null);
-        } catch (e) {
-            showIncognitoWarning();
-        }
-    } catch (e) {
-        // localStorage not available - likely incognito
-        showIncognitoWarning();
-    }
-}
-
-// Show incognito mode warning banner
-function showIncognitoWarning() {
-    const warningBanner = document.createElement('div');
-    warningBanner.id = 'incognitoWarning';
-    warningBanner.className = 'incognito-warning';
-    warningBanner.innerHTML = `
-        <div class="warning-content">
-            <span class="warning-icon">⚠️</span>
-            <div class="warning-text">
-                <strong>Incognito/Private Mode Detected</strong>
-                <p>Your session will not be saved. Please use a regular browser window to preserve your investments across page refreshes.</p>
-            </div>
-            <button onclick="dismissIncognitoWarning()" class="warning-dismiss">×</button>
-        </div>
-    `;
-    document.body.insertBefore(warningBanner, document.body.firstChild);
-}
-
-// Dismiss incognito warning
-function dismissIncognitoWarning() {
-    const warning = document.getElementById('incognitoWarning');
-    if (warning) {
-        warning.style.animation = 'slideOut 0.3s ease-out';
-        setTimeout(() => warning.remove(), 300);
-    }
-}
 
 // Show "Continue as..." option on role selection screen
 function showContinueAsOption(role, userName) {
@@ -260,6 +201,71 @@ function showNotification(message, type = 'success') {
     setTimeout(() => {
         notification.remove();
     }, 3000);
+}
+
+// Logout function - returns to role selection
+function logout() {
+    if (confirm('Are you sure you want to logout? Your session will be cleared.')) {
+        // Clear all localStorage
+        localStorage.removeItem('instructorSessionId');
+        localStorage.removeItem('lastStudentName');
+        localStorage.removeItem('lastStudentId');
+        localStorage.removeItem('studentSession');
+        
+        // Disconnect socket
+        socket.disconnect();
+        
+        // Reset state
+        currentRole = null;
+        currentUser = null;
+        
+        // Reload page to show role selection
+        window.location.reload();
+    }
+}
+
+// Change name function - for students only
+function changeName() {
+    const newName = prompt('Enter your new name:', currentUser.userName);
+    
+    if (!newName || newName.trim() === '') {
+        return; // User cancelled or entered empty name
+    }
+    
+    // Normalize name to title case
+    const normalizedName = newName.trim().charAt(0).toUpperCase() + newName.trim().slice(1).toLowerCase();
+    
+    if (normalizedName === currentUser.userName) {
+        showNotification('Name unchanged', 'info');
+        return;
+    }
+    
+    // Generate new student ID with new name
+    const newStudentId = 'student_' + normalizedName.toLowerCase() + '_' + Date.now();
+    
+    // Update localStorage
+    localStorage.setItem('lastStudentName', normalizedName);
+    localStorage.setItem('lastStudentId', newStudentId);
+    
+    // Disconnect and reconnect with new name
+    socket.disconnect();
+    
+    // Update current user
+    currentUser.userName = normalizedName;
+    
+    // Reconnect with new identity
+    setTimeout(() => {
+        socket.connect();
+        socket.emit('selectRole', {
+            role: 'student',
+            userName: normalizedName,
+            studentId: newStudentId
+        });
+        
+        // Update display
+        document.getElementById('studentName').textContent = `👨‍🎓 ${normalizedName}`;
+        showNotification(`Name changed to ${normalizedName}`, 'success');
+    }, 500);
 }
 
 // Instructor Functions
@@ -873,10 +879,8 @@ function startHeartbeatMonitoring() {
                 heartbeatWarningShown = true;
             }
         } else if (timeSinceLastPong > WARNING_THRESHOLD) {
-            if (!heartbeatWarningShown) {
-                showNotification('Connection may be slow. Monitoring...', 'warning');
-                heartbeatWarningShown = true;
-            }
+            // Silently monitor connection without showing warning
+            heartbeatWarningShown = true;
         } else {
             heartbeatWarningShown = false;
         }
